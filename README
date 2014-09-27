@@ -1,0 +1,5 @@
+Melange Vanity Dispatchers
+
+This repository will contain many dispatchers that pull information into the AirDispatch ecosystem. A list of the dispatchers is below:
+
+- `news` - A dispatcher that pulls News Stories from the New York Times and publishes them as messages. It also allows for `/latest` to always point to the latest story. It also serves thumbnails.
