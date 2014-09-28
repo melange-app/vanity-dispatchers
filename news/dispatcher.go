@@ -235,12 +235,16 @@ func (n *newsImage) ToDispatch(from *identity.Identity, to *identity.Address) (*
 	return encMsg, encReader, nil
 }
 
+type jsonTimes struct {
+	Results []*jsonNews `json:"results"`
+}
+
 type jsonNews struct {
 	Section           string    `json:"section"`
 	Subsection        string    `json:"subsection"`
 	Title             string    `json:"title"`
 	URL               string    `json:"url"`
-	ThumbnailStandard string    `json:"thumnail_standard"`
+	ThumbnailStandard string    `json:"thumbnail_standard"`
 	ItemType          string    `json:"item_type"`
 	PublishedDate     time.Time `json:"published_date"`
 }
@@ -265,20 +269,29 @@ func (m *newsFetcher) FetchNews() {
 
 	dec := json.NewDecoder(resp.Body)
 
-	j := make([]*jsonNews, 0)
-	err = dec.Decode(&j)
+	// j := make([]*jsonNews, 0)
+	t := &jsonTimes{}
+	err = dec.Decode(t)
 	if err != nil {
 		fmt.Println("Got error translating news", err)
+		return
 	}
+	j := t.Results
 
-	m.newsLock.RLock()
-	latestDate := m.Latest.Published
-	m.newsLock.RUnlock()
+	var latestDate time.Time
+
+	if m.Latest != nil {
+		m.newsLock.RLock()
+		latestDate = m.Latest.Published
+		m.newsLock.RUnlock()
+	}
 
 	populatedLatest := false
 	for _, v := range j {
 		// Check to see if we can add it.
-		if v.Section != "Sports" && v.ItemType != "blog" && v.ThumbnailStandard != "" && v.PublishedDate.After(latestDate) {
+		// fmt.Println(v)
+		if v.Section != "Sports" && v.ItemType == "Article" && v.ThumbnailStandard != "" && v.PublishedDate.After(latestDate) {
+			fmt.Println("Found a news story!")
 			// Create the News Item
 			n := &newsItem{
 				ID:        uuid.NewRandom().String(),
@@ -311,6 +324,8 @@ func (m *newsFetcher) FetchNews() {
 			m.imageLock.Unlock()
 		}
 	}
+
+	fmt.Println("Finished Fetching News.")
 }
 
 func (m *newsFetcher) GetNewsItem(name string, from *identity.Identity, to *identity.Address) *message.EncryptedMessage {
@@ -339,6 +354,7 @@ func (m *newsFetcher) GetLatestNewsItem(from *identity.Identity, to *identity.Ad
 	data := m.Latest
 
 	if data == nil {
+		fmt.Println("No latest news yet.")
 		return nil
 	}
 
