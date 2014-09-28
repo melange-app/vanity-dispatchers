@@ -103,9 +103,11 @@ func (m *NewsDispatcher) Run(port int) error {
 		News:      make(map[string]*newsItem),
 		Images:    make(map[string]*newsImage),
 		API:       m.APIKey,
+		Alias:     fmt.Sprintf("%s@%s", m.Alias, m.TrackerURL),
 		newsLock:  &sync.RWMutex{},
 		imageLock: &sync.RWMutex{},
 	}
+	m.Fetcher.FetchNews()
 	go m.Fetcher.StartFetch()
 
 	// Create the AirDispatch Server
@@ -124,6 +126,7 @@ type newsFetcher struct {
 	News   map[string]*newsItem
 	Images map[string]*newsImage
 	API    string
+	Alias  string
 
 	newsLock  *sync.RWMutex
 	imageLock *sync.RWMutex
@@ -186,6 +189,7 @@ func (n *newsImage) ToDispatch(from *identity.Identity, to *identity.Address) (*
 	hash := n.Hash
 
 	if hash == nil {
+		fmt.Println("Getting hash.")
 		if length > 1e7 {
 			return nil, nil, errors.New("Not setup to handle large images yet.")
 		}
@@ -201,7 +205,7 @@ func (n *newsImage) ToDispatch(from *identity.Identity, to *identity.Address) (*
 			return nil, nil, err
 		}
 
-		hash := hasher.Sum(nil)
+		hash = hasher.Sum(nil)
 		reader = fakeCloser{
 			Reader: b,
 		}
@@ -240,13 +244,19 @@ type jsonTimes struct {
 }
 
 type jsonNews struct {
-	Section           string    `json:"section"`
-	Subsection        string    `json:"subsection"`
-	Title             string    `json:"title"`
-	URL               string    `json:"url"`
-	ThumbnailStandard string    `json:"thumbnail_standard"`
-	ItemType          string    `json:"item_type"`
-	PublishedDate     time.Time `json:"published_date"`
+	Section           string           `json:"section"`
+	Subsection        string           `json:"subsection"`
+	Title             string           `json:"title"`
+	URL               string           `json:"url"`
+	ThumbnailStandard string           `json:"thumbnail_standard"`
+	ItemType          string           `json:"item_type"`
+	PublishedDate     time.Time        `json:"published_date"`
+	Multimedia        []jsonMultimedia `json:"multimedia"`
+}
+
+type jsonMultimedia struct {
+	URL    string `json:"url"`
+	Format string `json:"format"`
 }
 
 func (m *newsFetcher) StartFetch() {
@@ -272,7 +282,7 @@ func (m *newsFetcher) FetchNews() {
 	// j := make([]*jsonNews, 0)
 	t := &jsonTimes{}
 	err = dec.Decode(t)
-	if err != nil {
+	if err != nil && err.Error() != "json: cannot unmarshal string into Go value of type []main.jsonMultimedia" {
 		fmt.Println("Got error translating news", err)
 		return
 	}
@@ -290,21 +300,31 @@ func (m *newsFetcher) FetchNews() {
 	for _, v := range j {
 		// Check to see if we can add it.
 		// fmt.Println(v)
-		if v.Section != "Sports" && v.ItemType == "Article" && v.ThumbnailStandard != "" && v.PublishedDate.After(latestDate) {
+		if v.Section != "Sports" && v.ItemType == "Article" && v.Multimedia != nil && v.PublishedDate.After(latestDate) {
 			fmt.Println("Found a news story!")
 			// Create the News Item
+
+			imageId := uuid.NewRandom().String()
 			n := &newsItem{
 				ID:        uuid.NewRandom().String(),
 				Headline:  v.Title,
 				URL:       v.URL,
-				Image:     uuid.NewRandom().String(),
+				Image:     fmt.Sprintf("%s/%s", m.Alias, imageId),
 				Published: v.PublishedDate,
 			}
 
+			bigThumb := v.ThumbnailStandard
+			for _, v := range v.Multimedia {
+				// if v.Format == "thumbLarge" || v.Format == "Normal" {
+				if v.Format == "Normal" {
+					bigThumb = v.URL
+					break
+				}
+			}
 			// Create the News Image
 			i := &newsImage{
-				ID:  n.Image,
-				URL: v.ThumbnailStandard,
+				ID:  imageId,
+				URL: bigThumb,
 			}
 
 			m.newsLock.Lock()
@@ -320,7 +340,7 @@ func (m *newsFetcher) FetchNews() {
 			m.newsLock.Unlock()
 
 			m.imageLock.Lock()
-			m.Images[n.Image] = i
+			m.Images[imageId] = i
 			m.imageLock.Unlock()
 		}
 	}
